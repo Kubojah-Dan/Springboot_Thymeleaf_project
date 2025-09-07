@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>QR Code</title>
+</head>
+<body>
+<h1>QR Code for Lecture</h1>
+<img th:src="${qrCodeUrl}" alt="QR Code"/>
+<a th:href="@{/instructor/courses/{id}/lectures(id=${course.id})}">Back to Lectures</a>
+</body>
+</html>

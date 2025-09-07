@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - QR Attendance System</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter font -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a0033; /* Dark violet */
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 bg-[#1a0033]">
+<div class="bg-gray-900 rounded-3xl shadow-2xl p-8 w-full max-w-md">
+    <h1 class="text-3xl font-bold text-purple-300 mb-6 text-center">Register</h1>
+    <div th:if="${error}" class="p-4 mb-4 bg-red-600 text-white rounded-xl text-center" th:text="${error}"></div>
+    <div th:if="${param.registered}" class="p-4 mb-4 bg-green-600 text-white rounded-xl text-center">
+        Registration successful! Please log in.
+    </div>
+    <form th:action="@{/register}" method="post" class="space-y-4">
+        <div>
+            <label for="username" class="block text-purple-300 mb-2">Username</label>
+            <input type="text" id="username" name="username" class="w-full px-4 py-3 border border-gray-600 rounded-xl bg-gray-800 text-white focus:outline-none focus:ring-2 focus:ring-purple-500" required>
+        </div>
+        <div>
+            <label for="password" class="block text-purple-300 mb-2">Password</label>
+            <input type="password" id="password" name="password" class="w-full px-4 py-3 border border-gray-600 rounded-xl bg-gray-800 text-white focus:outline-none focus:ring-2 focus:ring-purple-500" required>
+        </div>
+        <div>
+            <label for="role" class="block text-purple-300 mb-2">Role</label>
+            <select id="role" name="role" class="w-full px-4 py-3 border border-gray-600 rounded-xl bg-gray-800 text-white focus:outline-none focus:ring-2 focus:ring-purple-500" required>
+                <option value="INSTRUCTOR">Instructor</option>
+                <option value="STUDENT">Student</option>
+            </select>
+        </div>
+        <input type="hidden" name="_csrf" th:value="${_csrf.token}" th:if="${_csrf != null}" />
+        <button type="submit" class="w-full bg-purple-600 text-white font-semibold py-3 px-6 rounded-xl hover:bg-purple-700 transition-colors duration-300">
+            Register
+        </button>
+    </form>
+    <p class="text-center text-gray-400 mt-4">
+        Already have an account? <a th:href="@{/login}" class="text-purple-300 hover:underline">Log In</a>
+    </p>
+</div>
+</body>
+</html>
+
+

@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Attendance System</title>
+    <!-- Tailwind CSS CDN (for development only; consider local installation for production) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter font from Google Fonts -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <!-- QR Code generation library -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <!-- QR Code scanning library -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.0.0/dist/jsQR.min.js"></script>
+
+    <script type="module">
+        // Suppress Tailwind CDN warning for development
+        console.warn = function() {}; // Suppress console warnings; remove in production
+
+        // Use Spring Security's authenticated username and roles
+        let userId = null;
+        let userRole = null; // 'INSTRUCTOR' or 'STUDENT'
+        let currentCourseId = null; // Track selected course for lecture creation
+
+        // Base URL for the Java backend API
+        const API_BASE_URL = 'http://localhost:8080';
+
+        // Fetch user info from the backend
+        async function fetchUserInfo() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/user/info`, {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                if (response.ok) {
+                    const user = await response.json();
+                    if (!user.username) {
+                        window.location.href = '/login';
+                        return;
+                    }
+                    userId = user.username;
+                    userRole = user.role;
+                    document.getElementById('logged-in-user').textContent = `Logged in as: ${userRole.charAt(0).toUpperCase() + userRole.slice(1)} (ID: ${userId})`;
+                    if (userRole === 'INSTRUCTOR') {
+                        document.getElementById('lecturer-features').classList.remove('hidden');
+                        document.getElementById('student-features').classList.add('hidden');
+                        loadCourses();
+                    } else if (userRole === 'STUDENT') {
+                        document.getElementById('lecturer-features').classList.add('hidden');
+                        document.getElementById('student-features').classList.remove('hidden');
+                        loadAttendanceRecords();
+                    }
+                    showSection('home-view');
+                } else {
+                    window.location.href = '/login';
+                }
+            } catch (e) {
+                console.error("Error fetching user info:", e);
+                window.location.href = '/login';
+            }
+        }
+
+
+        /**
+         * Displays a temporary message to the user.
+         * @param {string} message The message text.
+         * @param {string} type The message type ('success', 'error', 'info').
+         */
+        function showMessage(message, type) {
+            const messageBox = document.getElementById('message-box');
+            messageBox.textContent = message;
+            messageBox.className = `p-4 mt-4 rounded-xl text-center font-semibold transition-all duration-300 ${type === 'success' ? 'bg-purple-600 text-white' : type === 'error' ? 'bg-red-600 text-white' : 'bg-blue-600 text-white'}`;
+            messageBox.style.display = 'block';
+            setTimeout(() => {
+                messageBox.style.opacity = '0';
+                setTimeout(() => {
+                    messageBox.style.display = 'none';
+                    messageBox.style.opacity = '1';
+                }, 300);
+            }, 5000);
+        }
+
+        /**
+         * Switches the view between different sections of the app.
+         * @param {string} viewId The ID of the view to show.
+         */
+        function showSection(viewId) {
+            document.querySelectorAll('.app-section').forEach(section => {
+                section.classList.add('hidden');
+            });
+            document.getElementById(viewId).classList.remove('hidden');
+        }
+
+        /**
+         * Creates a new course.
+         */
+        async function createCourse() {
+            if (userRole !== 'INSTRUCTOR') {
+                showMessage("You are not authorized to perform this action.", 'error');
+                return;
+            }
+            const courseName = document.getElementById('course-name-input').value.trim();
+            if (!courseName) {
+                showMessage('Please enter a course name.', 'error');
+                return;
+            }
+            try {
+                const response = await fetch(`${API_BASE_URL}/instructor/courses/new`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: courseName }),
+                    credentials: 'include'
+                });
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Failed to create course: ${response.status} ${errorText}`);
+                }
+                showMessage('Course created successfully!', 'success');
+                document.getElementById('course-name-input').value = '';
+                loadCourses();
+            } catch (e) {
+                console.error("Error creating course:", e);
+                showMessage(`Failed to create course: ${e.message}`, 'error');
+            }
+        }
+
+        /**
+         * Loads courses for the instructor.
+         */
+         async function loadCourses() {
+            if (userRole !== 'INSTRUCTOR') return;
+            try {
+                const response = await fetch(`${API_BASE_URL}/instructor/courses`, {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error("Raw error response:", errorText);
+                    throw new Error(`Failed to fetch courses: ${response.status} ${errorText}`);
+                }
+                const rawResponse = await response.text();
+                console.log("Raw courses response:", rawResponse);
+                try {
+                    const courses = JSON.parse(rawResponse);
+                    renderCourses(courses);
+                } catch (jsonError) {
+                    console.error("JSON parse error:", jsonError, "Raw response:", rawResponse);
+                    throw new Error(`Invalid JSON response: ${jsonError.message}`);
+                }
+            } catch (e) {
+                console.error("Error fetching courses:", e);
+                showMessage(`Failed to load courses: ${e.message}`, 'error');
+            }
+        }
+
+        /**
+         * Renders courses in the UI.
+         * @param {Array} courses The array of courses.
+         */
+        function renderCourses(courses) {
+            const courseList = document.getElementById('course-list');
+            courseList.innerHTML = '';
+            if (courses.length === 0) {
+                courseList.innerHTML = '<p class="text-center text-gray-400">No courses found. Create one to add lectures.</p>';
+                return;
+            }
+            courses.forEach(course => {
+                const div = document.createElement('div');
+                div.className = 'flex justify-between items-center p-3 bg-gray-800 rounded-lg mb-2';
+                div.innerHTML = `
+                    <span>${course.name}</span>
+                    <button class="view-lectures-btn bg-purple-600 text-white py-1 px-3 rounded-lg hover:bg-purple-700" data-course-id="${course.id}">View Lectures</button>
+                `;
+                courseList.appendChild(div);
+            });
+            // Attach event listeners to buttons
+            document.querySelectorAll('.view-lectures-btn').forEach(button => {
+                button.addEventListener('click', () => {
+                    const courseId = button.getAttribute('data-course-id');
+                    showLectures(courseId);
+                });
+            });
+        }
+
+        /**
+         * Shows lectures for a course.
+         * @param {number} courseId The course ID.
+         */
+        async function showLectures(courseId) {
+            currentCourseId = courseId;
+            showSection('lectures-view');
+            document.getElementById('current-course-id').value = courseId;
+            try {
+                const response = await fetch(`${API_BASE_URL}/instructor/courses/${courseId}/lectures`, {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Failed to fetch lectures: ${response.status} ${errorText}`);
+                }
+                const lectures = await response.json();
+                renderLectures(lectures);
+            } catch (e) {
+                console.error("Error fetching lectures:", e);
+                showMessage(`Failed to load lectures: ${e.message}`, 'error');
+            }
+        }
+
+        /**
+         * Renders lectures in the UI.
+         * @param {Array} lectures The array of lectures.
+         */
+        function renderLectures(lectures) {
+            const lectureList = document.getElementById('lecture-list');
+            lectureList.innerHTML = '';
+            if (lectures.length === 0) {
+                lectureList.innerHTML = '<p class="text-center text-gray-400">No lectures found.</p>';
+                return;
+            }
+            lectures.forEach(lecture => {
+                const date = new Date(lecture.startTime).toLocaleString();
+                const div = document.createElement('div');
+                div.className = 'flex justify-between items-center p-3 bg-gray-800 rounded-lg mb-2';
+                div.innerHTML = `
+                    <span>${date}</span>
+                    <button class="generate-qr-btn bg-purple-600 text-white py-1 px-3 rounded-lg hover:bg-purple-700" data-lecture-id="${lecture.id}">Generate QR Code</button>
+                `;
+                lectureList.appendChild(div);
+            });
+            // Attach event listeners to QR code buttons
+            document.querySelectorAll('.generate-qr-btn').forEach(button => {
+                button.addEventListener('click', () => {
+                    const lectureId = button.getAttribute('data-lecture-id');
+                    generateQRCode(lectureId);
+                });
+            });
+        }
+
+        /**
+         * Creates a new lecture.
+         */
+        async function createLecture() {
+            if (userRole !== 'INSTRUCTOR') {
+                showMessage("You are not authorized to perform this action.", 'error');
+                return;
+            }
+            if (!currentCourseId) {
+                showMessage('Please select a course first.', 'error');
+                return;
+            }
+            const startTime = document.getElementById('lecture-start-time').value;
+            const endTime = document.getElementById('lecture-end-time').value;
+            if (!startTime || !endTime) {
+                showMessage('Please enter start and end times.', 'error');
+                return;
+            }
+            try {
+                const response = await fetch(`${API_BASE_URL}/instructor/courses/${currentCourseId}/lectures/new`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ startTime, endTime }),
+                    credentials: 'include'
+                });
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Failed to create lecture: ${response.status} ${errorText}`);
+                }
+                showMessage('Lecture created successfully!', 'success');
+                document.getElementById('lecture-start-time').value = '';
+                document.getElementById('lecture-end-time').value = '';
+                showLectures(currentCourseId);
+            } catch (e) {
+                console.error("Error creating lecture:", e);
+                showMessage(`Failed to create lecture: ${e.message}`, 'error');
+            }
+        }
+
+        /**
+         * Generates a QR code for a lecture.
+         * @param {number} lectureId The lecture ID.
+         */
+        async function generateQRCode(lectureId) {
+            if (userRole !== 'INSTRUCTOR') {
+                showMessage("You are not authorized to perform this action.", 'error');
+                return;
+            }
+            try {
+                const response = await fetch(`${API_BASE_URL}/instructor/lectures/${lectureId}/qr`, {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Failed to generate QR code: ${response.status} ${errorText}`);
+                }
+                const qrCodeData = await response.blob();
+                const qrCodeUrl = URL.createObjectURL(qrCodeData);
+                const qrCodeContainer = document.getElementById('qrcode');
+                qrCodeContainer.innerHTML = `<img src="${qrCodeUrl}" alt="QR Code" class="mx-auto">`;
+                document.getElementById('qr-info').classList.remove('hidden');
+                document.getElementById('qr-id').textContent = lectureId;
+                showMessage('QR code generated successfully!', 'success');
+            } catch (e) {
+                console.error("Error generating QR code:", e);
+                showMessage(`Failed to generate QR code: ${e.message}`, 'error');
+            }
+        }
+
+        let videoStream, qrScannerInterval;
+
+        /**
+         * Starts the QR code scanning process.
+         */
+        async function startQRScanner() {
+            if (userRole !== 'STUDENT') {
+                showMessage("You are not authorized to perform this action.", 'error');
+                return;
+            }
+            showSection('scanner-view');
+            const video = document.getElementById('qr-video');
+            const canvasElement = document.getElementById('qr-canvas');
+            const canvas = canvasElement.getContext('2d');
+
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                video.srcObject = videoStream;
+                video.play();
+
+                video.addEventListener('loadedmetadata', () => {
+                    canvasElement.width = video.videoWidth;
+                    canvasElement.height = video.videoHeight;
+                });
+
+                qrScannerInterval = setInterval(() => {
+                    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                        canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+                        const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
+                        const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+                        if (code) {
+                            console.log("QR Code detected:", code.data);
+                            processQRCode(code.data);
+                            clearInterval(qrScannerInterval);
+                            stopScanner();
+                        }
+                    }
+                }, 100);
+            } catch (e) {
+                console.error("Error accessing camera:", e);
+                showMessage('Error: Could not access camera. Please allow camera permissions.', 'error');
+                stopScanner();
+            }
+        }
+
+        /**
+         * Processes a scanned QR code by calling the backend API to mark attendance.
+         * @param {string} qrData The data extracted from the QR code (token).
+         */
+        async function processQRCode(token) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/attend?token=${token}`, {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                if (response.ok) {
+                    showMessage(`Attendance marked successfully!`, 'success');
+                } else {
+                    const errorText = await response.text();
+                    throw new Error(`Failed to mark attendance: ${response.status} ${errorText}`);
+                }
+            } catch (e) {
+                console.error("Error processing QR code:", e);
+                showMessage(`Failed to mark attendance: ${e.message}`, 'error');
+            } finally {
+                showSection('home-view');
+                loadAttendanceRecords();
+            }
+        }
+
+        /**
+         * Stops the video stream and QR scanner.
+         */
+        function stopScanner() {
+            if (qrScannerInterval) {
+                clearInterval(qrScannerInterval);
+                qrScannerInterval = null;
+            }
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                videoStream = null;
+            }
+            document.getElementById('qr-video').srcObject = null;
+        }
+
+        /**
+         * Loads attendance records from the backend API.
+         */
+        async function loadAttendanceRecords() {
+            if (userRole !== 'STUDENT') return;
+            try {
+                const response = await fetch(`${API_BASE_URL}/student/attendance/${userId}`, {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Failed to fetch attendance records: ${response.status} ${errorText}`);
+                }
+                const records = await response.json();
+                renderAttendanceRecords(records);
+            } catch (e) {
+                console.error("Error fetching attendance records:", e);
+                showMessage(`Failed to load attendance records: ${e.message}`, 'error');
+            }
+        }
+
+        /**
+         * Renders attendance records in the UI.
+         * @param {Array} records The array of attendance records.
+         */
+        function renderAttendanceRecords(records) {
+            const tableBody = document.getElementById('attendance-table-body');
+            tableBody.innerHTML = '';
+            if (records.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-gray-400">No attendance records found.</td></tr>';
+                return;
+            }
+            records.forEach(record => {
+                const date = new Date(record.timestamp).toLocaleString();
+                const row = `
+                    <tr class="hover:bg-gray-700">
+                        <td class="py-2 px-4 border-b border-gray-600">${record.lectureId}</td>
+                        <td class="py-2 px-4 border-b border-gray-600">${date}</td>
+                        <td class="py-2 px-4 border-b border-gray-600 truncate max-w-xs">${record.studentId}</td>
+                    </tr>
+                `;
+                tableBody.innerHTML += row;
+            });
+        }
+
+        /**
+         * Logs out the user.
+         */
+        function logout() {
+            const form = document.getElementById('logout-form');
+            form.submit();
+        }
+
+        // Add event listeners for buttons
+        window.onload = function() {
+            document.getElementById('lecturer-login-btn').addEventListener('click', () => window.location.href = '/login');
+            document.getElementById('student-login-btn').addEventListener('click', () => window.location.href = '/login');
+            document.getElementById('create-course-btn').addEventListener('click', createCourse);
+            document.getElementById('create-lecture-btn').addEventListener('click', createLecture);
+            document.getElementById('scan-qr-btn').addEventListener('click', startQRScanner);
+            document.getElementById('back-to-home-btn').addEventListener('click', () => {
+                stopScanner();
+                showSection('home-view');
+            });
+            document.getElementById('back-to-courses-btn').addEventListener('click', () => showSection('home-view'));
+            fetchUserInfo();
+        };
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a0033; /* Dark violet */
+        }
+        .container {
+            max-width: 800px;
+        }
+        #qrcode img {
+            margin: auto;
+        }
+        .message-box {
+            display: none;
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 bg-[#1a0033]">
+
+<!-- Main Container -->
+<div class="container bg-gray-900 rounded-3xl shadow-2xl p-8 flex flex-col items-center">
+
+    <!-- Header -->
+    <h1 class="text-3xl font-bold text-purple-300 mb-6 text-center">QR Attendance System</h1>
+
+    <!-- Message Box -->
+    <div id="message-box" class="message-box w-full"></div>
+
+    <!-- Login View -->
+    <div id="login-view" class="app-section w-full transition-opacity duration-500">
+        <div class="text-center">
+            <h2 class="text-2xl font-semibold text-purple-300 mb-6">Choose Your Role</h2>
+            <div class="flex flex-col md:flex-row justify-between w-full space-y-4 md:space-y-0 md:space-x-4">
+                <button id="lecturer-login-btn" class="w-full md:w-1/2 bg-purple-600 text-white font-semibold py-4 px-6 rounded-xl shadow-lg hover:bg-purple-700 transition-colors duration-300">
+                    Log in as Instructor
+                </button>
+                <button id="student-login-btn" class="w-full md:w-1/2 bg-purple-600 text-white font-semibold py-4 px-6 rounded-xl shadow-lg hover:bg-purple-700 transition-colors duration-300">
+                    Log in as Student
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Home View -->
+    <div id="home-view" class="app-section w-full hidden transition-opacity duration-500">
+        <p id="logged-in-user" class="text-center text-gray-400 mb-6 font-medium text-sm"></p>
+        <form id="logout-form" action="/logout" method="post" class="text-center mb-6">
+            <input type="hidden" name="_csrf" th:value="${_csrf.token}" th:if="${_csrf != null}" />
+            <button type="submit" class="bg-red-600 text-white font-semibold py-2 px-4 rounded-xl hover:bg-red-700 transition-colors duration-300">Logout</button>
+        </form>
+
+        <!-- Instructor Features -->
+        <div id="lecturer-features" class="hidden">
+            <h2 class="text-2xl font-semibold text-purple-300 mb-4">Create Course</h2>
+            <input type="text" id="course-name-input" placeholder="Enter Course Name" class="w-full px-4 py-3 mb-4 border border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-gray-800 text-white transition-all">
+            <button id="create-course-btn" class="w-full bg-purple-600 text-white font-semibold py-3 px-6 rounded-xl shadow-md hover:bg-purple-700 transition-colors duration-300">
+                Create Course
+            </button>
+            <div class="mt-8">
+                <h2 class="text-2xl font-semibold text-purple-300 mb-4">Your Courses</h2>
+                <div id="course-list" class="space-y-2"></div>
+            </div>
+        </div>
+
+        <!-- Student Features -->
+        <div id="student-features" class="hidden">
+            <button id="scan-qr-btn" class="w-full bg-purple-600 text-white font-semibold py-4 px-6 rounded-xl shadow-lg hover:bg-purple-700 transition-colors duration-300">
+                Scan QR Code
+            </button>
+            <div class="w-full bg-gray-800 p-6 rounded-xl shadow-inner border border-gray-600 mt-8">
+                <h2 class="text-2xl font-semibold text-purple-300 mb-4">Your Attendance Records</h2>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full bg-gray-900 rounded-lg overflow-hidden">
+                        <thead>
+                        <tr class="bg-gray-700 text-gray-300 uppercase text-sm leading-normal">
+                            <th class="py-3 px-6 text-left">Lecture ID</th>
+                            <th class="py-3 px-6 text-left">Date & Time</th>
+                            <th class="py-3 px-6 text-left">User ID</th>
+                        </tr>
+                        </thead>
+                        <tbody id="attendance-table-body" class="text-gray-300 text-sm font-light">
+                        <tr><td colspan="3" class="text-center py-4 text-gray-400">Loading records...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lectures View -->
+    <div id="lectures-view" class="app-section w-full hidden transition-opacity duration-500">
+        <h2 class="text-2xl font-semibold text-purple-300 mb-4">Lectures</h2>
+        <input type="hidden" id="current-course-id">
+        <div class="mb-6">
+            <h3 class="text-xl font-medium text-purple-300 mb-2">Create New Lecture</h3>
+            <input type="datetime-local" id="lecture-start-time" class="w-full px-4 py-3 mb-2 border border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-gray-800 text-white">
+            <input type="datetime-local" id="lecture-end-time" class="w-full px-4 py-3 mb-2 border border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-gray-800 text-white">
+            <button id="create-lecture-btn" class="w-full bg-purple-600 text-white font-semibold py-3 px-6 rounded-xl shadow-md hover:bg-purple-700 transition-colors duration-300">
+                Create Lecture
+            </button>
+        </div>
+        <div id="qr-info" class="hidden mt-6 text-center">
+            <p class="text-lg font-medium text-purple-300">Display this QR code for students to scan:</p>
+            <p class="text-sm text-gray-400 mt-1">Lecture ID: <span id="qr-id" class="font-bold"></span></p>
+            <div id="qrcode" class="mt-4 p-4 bg-gray-800 rounded-lg shadow-inner inline-block"></div>
+        </div>
+        <div class="mt-6">
+            <h3 class="text-xl font-medium text-purple-300 mb-2">Your Lectures</h3>
+            <div id="lecture-list" class="space-y-2"></div>
+        </div>
+        <button id="back-to-courses-btn" class="mt-6 bg-purple-600 text-white font-semibold py-2 px-4 rounded-xl hover:bg-purple-700 transition-colors duration-300">
+            Back to Courses
+        </button>
+    </div>
+
+    <!-- Student View Section (Scanner) -->
+    <div id="scanner-view" class="app-section w-full hidden transition-opacity duration-500 text-center">
+        <h2 class="text-2xl font-semibold text-purple-300 mb-4">Scan QR Code</h2>
+        <p class="text-gray-400 mb-4">Point your camera at the instructor's QR code.</p>
+        <div class="relative w-full aspect-video rounded-xl overflow-hidden shadow-lg border border-gray-600 bg-gray-800">
+            <video id="qr-video" class="w-full h-full object-cover"></video>
+            <canvas id="qr-canvas" class="absolute top-0 left-0 w-full h-full opacity-0"></canvas>
+        </div>
+        <button id="back-to-home-btn" class="mt-6 bg-red-600 text-white font-semibold py-2 px-4 rounded-xl shadow-md hover:bg-red-700 transition-colors duration-300">
+            Stop Scan
+        </button>
+    </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,71 @@
+
+     body {
+         font-family: Arial, sans-serif;
+         background-color: #1a0033; /* Dark violet */
+         color: #e6ccff; /* Light violet */
+         margin: 0;
+         padding: 20px;
+     }
+     h1 {
+         color: #cc99ff; /* Bright violet */
+         text-align: center;
+     }
+     a {
+         color: #cc99ff;
+         text-decoration: none;
+     }
+     a:hover {
+         color: #ffffff;
+         text-decoration: underline;
+     }
+     form {
+         background-color: #330066; /* Medium violet */
+         padding: 20px;
+         border-radius: 8px;
+         max-width: 400px;
+         margin: 0 auto;
+     }
+     label {
+         display: block;
+         margin-bottom: 8px;
+         color: #e6ccff;
+     }
+     input, select {
+         width: 100%;
+         padding: 8px;
+         margin-bottom: 16px;
+         border: 1px solid #cc99ff;
+         border-radius: 4px;
+         background-color: #4d0099; /* Slightly lighter violet */
+         color: #ffffff;
+     }
+     button {
+         background-color: #cc99ff;
+         color: #1a0033;
+         padding: 10px 20px;
+         border: none;
+         border-radius: 4px;
+         cursor: pointer;
+     }
+     button:hover {
+         background-color: #e6ccff;
+     }
+     table {
+         width: 100%;
+         max-width: 800px;
+         margin: 20px auto;
+         border-collapse: collapse;
+         background-color: #330066;
+     }
+     th, td {
+         padding: 12px;
+         text-align: left;
+         border-bottom: 1px solid #cc99ff;
+     }
+     th {
+         background-color: #4d0099;
+         color: #ffffff;
+     }
+     tr:hover {
+         background-color: #4d0099;
+     }
